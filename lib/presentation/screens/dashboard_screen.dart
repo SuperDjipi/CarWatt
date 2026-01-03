@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:carwatt/data/database/database_helper.dart';
 import 'package:carwatt/data/models/charge.dart';
+import 'package:carwatt/presentation/widgets/app_drawer.dart';
 import 'package:intl/intl.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -76,6 +77,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: const AppDrawer(),
       appBar: AppBar(
         title: const Text('CarWatt'),
         centerTitle: true,

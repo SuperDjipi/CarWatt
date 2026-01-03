@@ -5,6 +5,7 @@ import 'package:carwatt/data/database/database_helper.dart';
 import 'package:carwatt/data/models/station.dart';
 import 'package:carwatt/presentation/screens/charges_list_screen.dart';
 import 'package:carwatt/presentation/screens/station_form_screen.dart';
+import 'package:carwatt/presentation/widgets/app_drawer.dart';
 import 'package:geolocator/geolocator.dart';
 
 class MapScreen extends StatefulWidget {
@@ -279,6 +280,7 @@ class _MapScreenState extends State<MapScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: const AppDrawer(),
       appBar: AppBar(
         title: const Text('Carte des stations'),
         actions: [
