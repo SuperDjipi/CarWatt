@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:carwatt/data/database/database_helper.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'dart:convert';
-import 'package:carwatt/data/utils/csv_importer.dart';
 import 'package:intl/intl.dart';
+import 'package:csv/csv.dart' as csv_export;
+import 'package:carwatt/data/database/database_helper.dart';
+import 'package:carwatt/data/models/charge.dart';
+import 'package:carwatt/data/models/trajet.dart';
+import 'package:carwatt/data/utils/csv_importer.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -60,32 +63,183 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _exportData() async {
+  Future<void> _recalculateTrajets() async {
     try {
-      // Récupérer toutes les données
-      final charges = await _db.getCharges(orderBy: 'horodatage ASC');
-      final stations = await _db.getStations();
+      final db = await DatabaseHelper.instance.database;
+    
+      // Supprimer tous les trajets automatiques
+      await db.delete('trajets', where: 'type = ?', whereArgs: ['auto']);
+    
+      // Récupérer toutes les charges complètes
+      final charges = await DatabaseHelper.instance.getCharges(orderBy: 'horodatage ASC');
+      final chargesCompletes = charges.where((c) => c.statut == StatutCharge.complete).toList();
+    
+      // Recréer les trajets entre charges consécutives
+      for (int i = 0; i < chargesCompletes.length - 1; i++) {
+        final chargeDepart = chargesCompletes[i];
+        final chargeArrivee = chargesCompletes[i + 1];
       
-      // Créer le JSON
-      final data = {
-        'version': '1.0',
-        'export_date': DateTime.now().toIso8601String(),
-        'parametres': await _db.getParametres(),
-        'stations': stations.map((s) => s.toMap()).toList(),
-        'charges': charges.map((c) => c.toMap()).toList(),
-      };
+        // Utiliser la méthode privée via reflection n'est pas possible
+        // On doit dupliquer la logique ou rendre la méthode publique
+        final energieConsommee = chargeDepart.jaugeFin - chargeArrivee.jaugeDebut;
       
-      // Sauvegarder dans un fichier temporaire
-      final tempDir = await getTemporaryDirectory();
+        if (chargeDepart.stationId != null && 
+            chargeDepart.stationId == chargeArrivee.stationId) {
+          continue;
+        }
+      
+        if (energieConsommee <= 0) continue;
+      
+        String? nomStationDepart;
+        String? nomStationArrivee;
+      
+        if (chargeDepart.stationId != null) {
+          final stationDepart = await DatabaseHelper.instance.getStation(chargeDepart.stationId!);
+          nomStationDepart = stationDepart?.nom;
+        }
+      
+        if (chargeArrivee.stationId != null) {
+          final stationArrivee = await DatabaseHelper.instance.getStation(chargeArrivee.stationId!);
+          nomStationArrivee = stationArrivee?.nom;
+        }
+      
+        final trajet = Trajet(
+          date: chargeArrivee.horodatage,
+          rechargeDepart: chargeDepart.id,
+          rechargeArrivee: chargeArrivee.id,
+          qtEnergiePercent: energieConsommee,
+          type: TypeTrajet.auto,
+          lieuDepart: nomStationDepart,
+          lieuArrivee: nomStationArrivee,
+          jaugeDepartPercent: chargeDepart.jaugeFin,
+          jaugeArriveePercent: chargeArrivee.jaugeDebut,
+          kilometrageDepart: chargeDepart.kilometrage,
+          kilometrageArrivee: chargeArrivee.kilometrage,
+        );
+      
+        await DatabaseHelper.instance.insertTrajet(trajet);
+      }
+    
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Trajets recalculés avec succès !'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _exportDataCSV() async {
+    try {
+      // Demander où sauvegarder (uniquement sur desktop)
+      String? outputPath;
+      
+      if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+        outputPath = await FilePicker.platform.getDirectoryPath(
+          dialogTitle: 'Choisir le dossier de sauvegarde',
+        );
+        
+        if (outputPath == null) {
+          // L'utilisateur a annulé
+          return;
+        }
+      } else {
+        // Sur mobile, utiliser le dossier temporaire
+        final tempDir = await getTemporaryDirectory();
+        outputPath = tempDir.path;
+      }
+      
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-      final file = File('${tempDir.path}/carwatt_export_$timestamp.json');
-      await file.writeAsString(jsonEncode(data));
       
-      // Partager le fichier
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        subject: 'Export CarWatt',
-      );
+      // Export des stations
+      final stations = await _db.getStations();
+      final stationsData = [
+        ['Id', 'name', 'latitude', 'longitude', 'address', 'network'],
+        ...stations.map((s) => [
+          s.id.toString(),
+          s.nom,
+          s.positionGps?.latitude.toString() ?? '',
+          s.positionGps?.longitude.toString() ?? '',
+          s.adresse ?? '',
+          s.reseaux.join(';'),
+        ]),
+      ];
+      
+      final stationsCsv = const csv_export.ListToCsvConverter(
+        fieldDelimiter: '\t',
+        eol: '\n',
+      ).convert(stationsData);
+      
+      final stationsFile = File('$outputPath/carwatt_stations_$timestamp.csv');
+      await stationsFile.writeAsString(stationsCsv, encoding: latin1);
+      
+      // Export des charges
+      final charges = await _db.getCharges(orderBy: 'horodatage ASC');
+      final chargesData = [
+        [
+          'id',
+          'timestamp',
+          'mileage',
+          'stationId',
+          'startChargePercentage',
+          'endChargePercentage',
+          'kwhAmount',
+          'inputMode',
+          'amountPaid',
+          'e10Price',
+          'statut',
+        ],
+        ...charges.map((c) => [
+          c.id.toString(),
+          c.horodatage.millisecondsSinceEpoch.toString(),
+          c.kilometrage?.toStringAsFixed(0) ?? '',
+          c.stationId?.toString() ?? '',
+          c.jaugeDebut.toStringAsFixed(1),
+          c.jaugeFin.toStringAsFixed(1),
+          c.nbKwh.toStringAsFixed(2),
+          c.modeSaisie == ModeSaisie.montant ? 'BY_AMOUNT' : 'BY_PRICE',
+          c.paye.toStringAsFixed(2),
+          c.prixE10?.toStringAsFixed(3) ?? '',
+          c.statut == StatutCharge.draft ? 'DRAFT' : 'COMPLETE',
+        ]),
+      ];
+      
+      final chargesCsv = const csv_export.ListToCsvConverter(
+        fieldDelimiter: ',',
+        eol: '\n',
+      ).convert(chargesData);
+      
+      final chargesFile = File('$outputPath/carwatt_charges_$timestamp.csv');
+      await chargesFile.writeAsString(chargesCsv, encoding: utf8);
+      
+      if (mounted) {
+        if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Export réussi dans :\n$outputPath'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        } else {
+          // Sur mobile, partager les fichiers
+          await Share.shareXFiles(
+            [
+              XFile(stationsFile.path),
+              XFile(chargesFile.path),
+            ],
+            subject: 'Export CarWatt',
+          );
+        }
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -102,6 +256,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
         builder: (context) => const ImportCSVScreen(),
       ),
     );
+  }
+
+  Future<void> _migrateToV3() async {
+    try {
+      final db = await DatabaseHelper.instance.database;
+      
+      // Vérifier si la colonne type existe déjà
+      final result = await db.rawQuery('PRAGMA table_info(trajets)');
+      final hasTypeColumn = result.any((col) => col['name'] == 'type');
+      
+      if (!hasTypeColumn) {
+        // Ajouter les colonnes manquantes
+        await db.execute('ALTER TABLE trajets ADD COLUMN type TEXT CHECK(type IN (\'auto\', \'manual\')) NOT NULL DEFAULT \'auto\'');
+        await db.execute('ALTER TABLE trajets ADD COLUMN lieu_depart TEXT');
+        await db.execute('ALTER TABLE trajets ADD COLUMN lieu_arrivee TEXT');
+        await db.execute('ALTER TABLE trajets ADD COLUMN jauge_depart_percent REAL');
+        await db.execute('ALTER TABLE trajets ADD COLUMN jauge_arrivee_percent REAL');
+        await db.execute('ALTER TABLE trajets ADD COLUMN kilometrage_depart REAL');
+        await db.execute('ALTER TABLE trajets ADD COLUMN kilometrage_arrivee REAL');
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Base de données migrée vers v3 avec succès !'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Base de données déjà à jour (v3)'),
+              backgroundColor: Colors.blue,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur de migration: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _showDeleteConfirmation() async {
@@ -265,13 +468,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onTap: _importCSV,
                 ),
                 const SizedBox(height: 12),
+
+                _buildActionCard(
+                  icon: Icons.upgrade,
+                  title: 'Migrer la base de données v3',
+                  subtitle: 'Ajouter les colonnes pour les trajets',
+                  color: Colors.blue,
+                  onTap: _migrateToV3,
+                ),                
+                const SizedBox(height: 12),
                 
                 _buildActionCard(
                   icon: Icons.download,
-                  title: 'Exporter les données',
-                  subtitle: 'Sauvegarder en JSON',
+                  title: 'Exporter les données (CSV)',
+                  subtitle: 'Sauvegarder stations et charges',
                   color: Colors.green,
-                  onTap: _exportData,
+                  onTap: _exportDataCSV,
                 ),
                 const SizedBox(height: 12),
                 
@@ -282,7 +494,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   color: Colors.red,
                   onTap: _showDeleteConfirmation,
                 ),
+                const SizedBox(height: 12),
 
+                _buildActionCard(
+                  icon: Icons.refresh,
+                  title: 'Recalculer les trajets',
+                  subtitle: 'Supprimer et recréer tous les trajets auto',
+                  color: Colors.orange,
+                  onTap: _recalculateTrajets,
+                ),
                 const SizedBox(height: 32),
 
                 // À propos
@@ -491,6 +711,68 @@ class _ImportCSVScreenState extends State<ImportCSVScreen> {
   String? _chargesPath;
   Map<String, int>? _importResult;
 
+  Future<void> _showWarningAndImport() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange, size: 28),
+            SizedBox(width: 12),
+            Text('Attention'),
+          ],
+        ),
+        content: const Text(
+          'L\'import va REMPLACER toutes vos données actuelles.\n\n'
+          'Voulez-vous d\'abord exporter vos données actuelles en CSV ?'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.orange),
+            child: const Text('Exporter d\'abord'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, null),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Continuer sans exporter'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == false) {
+      // Annuler
+      return;
+    }
+
+    if (confirmed == true) {
+      // Exporter d'abord
+      if (mounted) {
+        Navigator.pop(context); // Fermer l'écran d'import
+        // Déclencher l'export depuis l'écran précédent
+        // On pourrait faire mieux mais pour simplifier :
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Utilisez le bouton "Exporter" dans Paramètres, puis relancez l\'import'),
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Continuer (confirmed == null)
+    await _startImport();
+  }
+
   Future<void> _pickStationsFile() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -531,7 +813,12 @@ class _ImportCSVScreenState extends State<ImportCSVScreen> {
     });
 
     try {
+      // SUPPRIMER TOUTES LES DONNÉES EXISTANTES
+      await DatabaseHelper.instance.deleteAllData();
+      
+      // Importer les nouvelles données
       final result = await _importer.importAll(_stationsPath!, _chargesPath!);
+      
       setState(() {
         _importResult = result;
         _isImporting = false;
@@ -585,7 +872,29 @@ class _ImportCSVScreenState extends State<ImportCSVScreen> {
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 48),
+            const SizedBox(height: 16),
+            // AJOUTER CET AVERTISSEMENT
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.orange[50],
+                border: Border.all(color: Colors.orange[300]!),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.warning, color: Colors.orange[700]),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'L\'import remplacera toutes vos données existantes',
+                      style: TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 32),
             
             _buildFileSelector(
               label: 'Fichier des stations',
@@ -604,7 +913,7 @@ class _ImportCSVScreenState extends State<ImportCSVScreen> {
             const SizedBox(height: 32),
             
             ElevatedButton(
-              onPressed: _isImporting ? null : _startImport,
+              onPressed: _isImporting ? null : _showWarningAndImport, // MODIFIER ICI
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.green,
                 foregroundColor: Colors.white,
@@ -654,6 +963,18 @@ class _ImportCSVScreenState extends State<ImportCSVScreen> {
                       Text(
                         '${_importResult!['charges']} charges importées',
                         style: TextStyle(color: Colors.green[700]),
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          // FORCER LE RAFRAÎCHISSEMENT DU DASHBOARD
+                          Navigator.popUntil(context, (route) => route.isFirst);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                        ),
+                        child: const Text('Retour au tableau de bord'),
                       ),
                     ],
                   ),

@@ -8,96 +8,152 @@ import '../models/charge.dart';
 
 class CsvImporter {
   final DatabaseHelper _db = DatabaseHelper.instance;
+  final Map<int, int> _stationIdMapping = {}; // AJOUTER CETTE LIGNE
 
   /// Importe les stations depuis un fichier CSV
-  /// Format attendu: Id, name, latitude, longitude, address, network
-  /// Retourne un Map des anciens IDs vers les nouveaux IDs
-  Future<Map<int, int>> importStations(String filePath) async {
+  Future<int> importStations(String filePath) async {
     final file = File(filePath);
-    // Essayer plusieurs encodages
+    
+    // Lire le fichier avec gestion d'encodage
     String content;
     try {
       content = await file.readAsString(encoding: utf8);
     } catch (e) {
-      // Si UTF-8 échoue, essayer Latin1
       try {
         content = await file.readAsString(encoding: latin1);
-      } catch (e2) {
-        // Dernier recours : lire les bytes et ignorer les erreurs
+      } catch (e) {
+        // Dernier recours : UTF-8 sans validation stricte
+        final bytes = await file.readAsBytes();
+        content = utf8.decode(bytes, allowMalformed: true); // CORRIGER ICI
+      }
+    }
+    
+    content = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    
+    // Parser avec tabulation
+    final rows = csv_parser.CsvToListConverter(
+      fieldDelimiter: '\t',
+      eol: '\n', 
+    ).convert(content);
+    
+    print('=== IMPORT STATIONS DEBUG ===');
+    print('Nombre de lignes: ${rows.length}');
+    if (rows.isNotEmpty) {
+      print('En-têtes: ${rows[0]}');
+    }
+    
+    int importCount = 0;
+    
+    // Ignorer la ligne d'en-tête (index 0)
+    for (int i = 1; i < rows.length; i++) {
+      final row = rows[i];
+      
+      print('Ligne $i: $row (${row.length} colonnes)');
+      
+      if (row.length < 6) {
+        print('  -> Ignorée (pas assez de colonnes)');
+        continue;
+      }
+      
+      try {
+        final latitude = row[2].toString().isEmpty ? null : double.parse(row[2].toString().replaceAll(',', '.'));
+        final longitude = row[3].toString().isEmpty ? null : double.parse(row[3].toString().replaceAll(',', '.'));
+        
+        LatLng? position;
+        if (latitude != null && longitude != null) {
+          position = LatLng(latitude, longitude);
+        }
+        
+        final reseaux = row[5].toString().split(';').where((r) => r.isNotEmpty).toList();
+        
+        final station = Station(
+          nom: row[1].toString(),
+          positionGps: position,
+          adresse: row[4].toString().isEmpty ? null : row[4].toString(),
+          reseaux: reseaux,
+        );
+        
+        final id = await _db.insertStation(station);
+        _stationIdMapping[int.parse(row[0].toString())] = id;
+        importCount++;
+        
+        print('  -> Station importée avec succès (id: $id)');
+      } catch (e) {
+        print('  -> Erreur: $e');
+      }
+    }
+    
+    print('Import terminé: $importCount stations importées');
+    return importCount;
+  }
+
+  /// Importe les charges depuis un fichier CSV
+  Future<int> importCharges(String filePath, Map<int, int> stationIdMapping) async {
+    final file = File(filePath);
+    
+    // Lire le fichier avec gestion d'encodage
+    String content;
+    try {
+      content = await file.readAsString(encoding: utf8);
+    } catch (e) {
+      try {
+        content = await file.readAsString(encoding: latin1);
+      } catch (e) {
         final bytes = await file.readAsBytes();
         content = utf8.decode(bytes, allowMalformed: true);
       }
     }
     
-    // Parser le CSV avec tabulation comme séparateur
-    final rows = csv_parser.CsvToListConverter(fieldDelimiter: '\t').convert(content);
+    content = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
     
-    Map<int, int> idMapping = {};
+    // Parser le CSV avec virgule comme séparateur
+    final rows = csv_parser.CsvToListConverter(
+      eol: '\n', 
+    ).convert(content);
     
-    // Ignorer la ligne d'en-tête (index 0)
-    for (int i = 1; i < rows.length; i++) {
-      final row = rows[i];
-      if (row.length < 6) continue; // Vérifier qu'on a assez de colonnes
-      
-      try {
-        final oldId = _parseInt(row[0]);
-        
-        final station = Station(
-          nom: row[1].toString(),
-          positionGps: LatLng(
-            _parseDouble(row[2]),
-            _parseDouble(row[3]),
-          ),
-          adresse: row[4].toString(),
-          reseaux: [row[5].toString()],
-        );
-        
-        final newId = await _db.insertStation(station);
-        idMapping[oldId] = newId;
-      } catch (e) {
-        print('Erreur ligne ${i + 1}: $e');
-      }
+    print('=== IMPORT CHARGES DEBUG ===');
+    print('Nombre de lignes: ${rows.length}');
+    if (rows.isNotEmpty) {
+      print('En-têtes: ${rows[0]}');
     }
     
-    return idMapping;
-  }
-
-  /// Importe les charges depuis un fichier CSV
-  /// Format attendu: id,timestamp,mileage,stationId,startChargePercentage,endChargePercentage,kwhAmount,inputMode,amountPaid,e10Price
-  Future<int> importCharges(String filePath, Map<int, int> stationIdMapping) async {
-    final file = File(filePath);
-    final content = await file.readAsString();
-  
-    // Parser le CSV avec virgule comme séparateur
-    final rows = csv_parser.CsvToListConverter().convert(content);
-  
     int importCount = 0;
-  
+    
     // Ignorer la ligne d'en-tête (index 0)
     for (int i = 1; i < rows.length; i++) {
       final row = rows[i];
-      if (row.length < 10) continue; // Vérifier qu'on a assez de colonnes
-    
+      
+      print('Ligne $i: $row (${row.length} colonnes)');
+      
+      if (row.length < 11) {
+        print('  -> Ignorée (pas assez de colonnes)');
+        continue;
+      }
+      
       try {
         // Déterminer le mode de saisie
         final inputModeStr = row[7].toString().replaceAll("'", "");
         final modeSaisie = inputModeStr == 'BY_AMOUNT' 
             ? ModeSaisie.montant 
             : ModeSaisie.prixKwh;
-      
+        
+        // Déterminer le statut
+        final statutStr = row.length > 10 ? row[10].toString() : 'COMPLETE';
+        final statut = statutStr == 'DRAFT' ? StatutCharge.draft : StatutCharge.complete;
+        
         // Mapper l'ancien ID de station vers le nouveau
-        final oldStationId = _parseInt(row[3]);
-        final newStationId = stationIdMapping[oldStationId];
-      
-        // Parser tous les champs numériques avec gestion de type
-        final timestamp = _parseInt(row[1]);
-        final kilometrage = _parseDouble(row[2]);
-        final jaugeDebut = _parseDouble(row[4]);
-        final jaugeFin = _parseDouble(row[5]);
-        final nbKwh = _parseDouble(row[6]);
-        final paye = _parseDouble(row[8]);
-        final prixE10 = _parseDouble(row[9]); 
-      
+        final oldStationId = row[3].toString().isEmpty ? null : int.parse(row[3].toString());
+        final newStationId = oldStationId != null ? stationIdMapping[oldStationId] : null;
+        
+        // Parser tous les champs numériques
+        final timestamp = int.parse(row[1].toString());
+        final kilometrage = row[2].toString().isEmpty ? null : double.parse(row[2].toString().replaceAll(',', '.'));
+        final jaugeDebut = double.parse(row[4].toString().replaceAll(',', '.'));
+        final jaugeFin = double.parse(row[5].toString().replaceAll(',', '.'));
+        final nbKwh = double.parse(row[6].toString().replaceAll(',', '.'));
+        final paye = double.parse(row[8].toString().replaceAll(',', '.'));
+        final prixE10 = row[9].toString().isEmpty ? null : double.parse(row[9].toString().replaceAll(',', '.'));
+        
         final charge = Charge(
           horodatage: DateTime.fromMillisecondsSinceEpoch(timestamp),
           kilometrage: kilometrage,
@@ -108,61 +164,57 @@ class CsvImporter {
           paye: paye,
           stationId: newStationId,
           prixE10: prixE10,
+          statut: statut,
         );
-        try {
-
-         await _db.insertCharge(charge);
-
-         importCount++;
-        } catch (e, stackTrace) {
-         print('ERREUR insertCharge ligne ${i + 1}: $e');
-         print('StackTrace: $stackTrace');
-         print('Charge: horodatage=${charge.horodatage}, km=${charge.kilometrage}, station=${charge.stationId}');
-         rethrow; // Pour voir l'erreur complète
-        }
+        
+        await _db.insertCharge(charge);
+        importCount++;
+        
         if (importCount % 10 == 0) {
-          print('$importCount charges importées...');
+          print('  -> $importCount charges importées...');
         }
       } catch (e) {
-        print('Erreur ligne ${i + 1}: $e - Row: $row');
+        print('  -> Erreur ligne ${i + 1}: $e');
       }
     }
-  
+    
     print('Import terminé: $importCount charges importées');
     return importCount;
   }
 
   /// Importe à la fois les stations et les charges
   Future<Map<String, int>> importAll(String stationsPath, String chargesPath) async {
-    // D'abord importer les stations et récupérer le mapping des IDs
-    final stationIdMapping = await importStations(stationsPath);
+    print('Début de l\'import complet...');
     
-    // Ensuite importer les charges avec le mapping
-    final chargesCount = await importCharges(chargesPath, stationIdMapping);
+    // 1. Importer les stations
+    final stationsCount = await importStations(stationsPath);
+    
+    // 2. Importer les charges avec le mapping des IDs de stations
+    final chargesCount = await importCharges(chargesPath, _stationIdMapping);
     
     return {
-      'stations': stationIdMapping.length,
+      'stations': stationsCount,
       'charges': chargesCount,
     };
   }
 
-  // Helpers pour parser les valeurs
+  // Méthodes utilitaires pour parser les nombres de façon robuste
   double _parseDouble(dynamic value) {
     if (value is double) return value;
     if (value is int) return value.toDouble();
     if (value is String) {
-      final cleaned = value.trim().replaceAll(',', '.');
+      final cleaned = value.replaceAll(',', '.').trim();
       return double.parse(cleaned);
     }
-    throw FormatException('Cannot parse double from: $value');
+    throw FormatException('Cannot parse $value as double');
   }
 
   int _parseInt(dynamic value) {
     if (value is int) return value;
     if (value is double) return value.toInt();
     if (value is String) {
-      return int.parse(value);
+      return int.parse(value.trim());
     }
-    throw FormatException('Cannot parse int from: $value');
+    throw FormatException('Cannot parse $value as int');
   }
 }

@@ -424,23 +424,10 @@ class _MapScreenState extends State<MapScreen> {
                                 height: 40,
                                 child: GestureDetector(
                                   onTap: () => _showStationDetails(station),
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: Colors.green,
-                                      shape: BoxShape.circle,
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withOpacity(0.2),
-                                          blurRadius: 4,
-                                          offset: const Offset(0, 2),
-                                        ),
-                                      ],
-                                    ),
-                                    child: const Icon(
-                                      Icons.ev_station,
-                                      color: Colors.white,
-                                      size: 20,
-                                    ),
+                                  child: Image.asset(
+                                    'assets/images/map_marker.png', // Votre marker
+                                    width: 40,
+                                    height: 40,
                                   ),
                                 ),
                               );

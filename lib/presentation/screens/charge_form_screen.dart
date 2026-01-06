@@ -119,12 +119,13 @@ class _ChargeFormScreenState extends State<ChargeFormScreen> {
     }
   }
 
-  void _loadExistingCharge() {
+  void _loadExistingCharge() async {
     final charge = widget.charge!;
     _horodatage = charge.horodatage;
     _dateController.text = DateFormat('dd/MM/yyyy').format(charge.horodatage);
     _timeController.text = DateFormat('HH:mm').format(charge.horodatage);
     _kilometrageController.text = charge.kilometrage?.toStringAsFixed(0) ?? '';
+
     _jaugeDebut = charge.jaugeDebut;
     _jaugeFin = charge.jaugeFin;
     _jaugeDebutController.text = charge.jaugeDebut.toStringAsFixed(0);
@@ -139,6 +140,12 @@ class _ChargeFormScreenState extends State<ChargeFormScreen> {
       _prixE10Controller.text = charge.prixE10!.toStringAsFixed(3);
     } else {
       _prixE10Controller.text = '1.600'; 
+    }
+    if (charge.stationId != null) {
+      final station = await _db.getStation(charge.stationId!);
+      setState(() {
+        _selectedStation = station;
+      });
     }
   }
 
@@ -999,7 +1006,7 @@ class _ChargeFormScreenState extends State<ChargeFormScreen> {
             : null,
         statut: statut, // AJOUTER LE STATUT
       );
-
+      print('Sauvegarde charge - Station ID: ${charge.stationId}');
       if (widget.charge == null) {
         await _db.insertCharge(charge);
       } else {

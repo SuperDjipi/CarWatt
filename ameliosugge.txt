@@ -1,12 +1,6 @@
-Import impossible sur Android : Lookup failed : convert in @methods in CsvToListConverter in package csv:csv.dart
-
-Ecran carte :
-- indique 271 stations (?)
-- clic sur station OK, puis :
-    - bouton modifier la station,
-    - bouton montrer les stations du réseau
-    - bouton pour amener sur la liste des charges effectuées à cet endroit.
-
 Liste des charges :
 - dans la liste des recharges, pour chaque charge, une minicarte pour localiser la station
 - dans le détail, idem
+
+Pour la carte, il vaut mieux la centrer sur l'ensemble des points visibles (en particulier quand un réseau est choisi) ; mettre un FAB pour centrer sur la position gps si elle existe.
+

@@ -23,7 +23,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -89,11 +89,18 @@ class DatabaseHelper {
       CREATE TABLE trajets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date INTEGER NOT NULL,
-        recharge_depart INTEGER NOT NULL,
-        recharge_arrivee INTEGER NOT NULL,
+        recharge_depart INTEGER,
+        recharge_arrivee INTEGER,
         qt_energie_percent REAL NOT NULL,
-        FOREIGN KEY (recharge_depart) REFERENCES charges(id) ON DELETE CASCADE,
-        FOREIGN KEY (recharge_arrivee) REFERENCES charges(id) ON DELETE CASCADE
+        type TEXT CHECK(type IN ('auto', 'manual')) NOT NULL DEFAULT 'auto',
+        lieu_depart TEXT,
+        lieu_arrivee TEXT,
+        jauge_depart_percent REAL,
+        jauge_arrivee_percent REAL,
+        kilometrage_depart REAL,
+        kilometrage_arrivee REAL,
+        FOREIGN KEY (recharge_depart) REFERENCES charges(id) ON DELETE SET NULL,
+        FOREIGN KEY (recharge_arrivee) REFERENCES charges(id) ON DELETE SET NULL
       )
     ''');
 
@@ -107,6 +114,16 @@ class DatabaseHelper {
       await db.execute('''
         ALTER TABLE charges ADD COLUMN statut TEXT CHECK(statut IN ('draft', 'complete')) NOT NULL DEFAULT 'complete'
       ''');
+    }  
+    if (oldVersion < 3) {
+      // Migration vers version 3 : ajout des champs pour trajets manuels
+      await db.execute('ALTER TABLE trajets ADD COLUMN type TEXT CHECK(type IN (\'auto\', \'manual\')) NOT NULL DEFAULT \'auto\'');
+      await db.execute('ALTER TABLE trajets ADD COLUMN lieu_depart TEXT');
+      await db.execute('ALTER TABLE trajets ADD COLUMN lieu_arrivee TEXT');
+      await db.execute('ALTER TABLE trajets ADD COLUMN jauge_depart_percent REAL');
+      await db.execute('ALTER TABLE trajets ADD COLUMN jauge_arrivee_percent REAL');
+      await db.execute('ALTER TABLE trajets ADD COLUMN kilometrage_depart REAL');
+      await db.execute('ALTER TABLE trajets ADD COLUMN kilometrage_arrivee REAL');
     }
   }
 
@@ -385,6 +402,14 @@ class DatabaseHelper {
     // 5. Insérer la charge
     final id = await db.insert('charges', finalCharge.toMap());
 
+    // Si la charge est complète et qu'il y a une charge précédente complète,
+    // créer automatiquement un trajet
+    if (charge.statut == StatutCharge.complete && 
+        previous != null && 
+        previous.statut == StatutCharge.complete) {
+      await _createAutoTrajet(previous, calculatedCharge.copyWith(id: id));
+    }
+
     // 6. Recalculer les charges suivantes (économie cumulée)
     await recalculateFollowingCharges(charge.horodatage);
 
@@ -424,7 +449,7 @@ class DatabaseHelper {
     return Charge.fromMap(maps.first);
   }
 
-  Future<void> updateCharge(Charge charge) async {
+  Future<int> updateCharge(Charge charge) async {
     final db = await database;
 
     // Récupérer la charge précédente
@@ -444,12 +469,13 @@ class DatabaseHelper {
     ''', [charge.horodatage.millisecondsSinceEpoch]);
     
     final distanceTotaleValue = distanceTotaleResult.first['total'];
-    double distanceTotale = 0.0;
+    double distanceTotaleBase = 0.0;
     if (distanceTotaleValue is int) {
-     distanceTotale = distanceTotaleValue.toDouble();
+     distanceTotaleBase = distanceTotaleValue.toDouble();
     } else if (distanceTotaleValue is double) {
-     distanceTotale = distanceTotaleValue;
+     distanceTotaleBase = distanceTotaleValue;
     }
+    final distanceTotale = distanceTotaleBase + (calculatedCharge.distance ?? 0.0);
     final economieAu100 = distanceTotale > 0 ? economieCumulee / distanceTotale * 100.0 : 0.0;
 
     final finalCharge = calculatedCharge.copyWith(
@@ -457,15 +483,20 @@ class DatabaseHelper {
       economieAu100: economieAu100,
     );
 
-    await db.update(
+    final result = await db.update(
       'charges',
       finalCharge.toMap(),
       where: 'id = ?',
       whereArgs: [charge.id],
     );
+    // Recalculer les trajets automatiques liés
+    if (charge.id != null) {
+      await _updateTrajetsForCharge(charge.id!);
+    }
 
     // Recalculer les charges suivantes
     await recalculateFollowingCharges(charge.horodatage);
+    return result;
   }
 
   Future<void> deleteCharge(int id) async {
@@ -487,18 +518,39 @@ class DatabaseHelper {
 
   // ========== MÉTHODES TRAJETS ==========
 
+  Future<List<Trajet>> getTrajets({String? orderBy}) async {
+    final db = await database;
+    final maps = await db.query(
+      'trajets',
+      orderBy: orderBy ?? 'date DESC',
+    );
+    return maps.map((map) => Trajet.fromMap(map)).toList();
+  }
+
+  Future<Trajet?> getTrajet(int id) async {
+    final db = await database;
+    final maps = await db.query(
+      'trajets',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (maps.isEmpty) return null;
+    return Trajet.fromMap(maps.first);
+  }
+
   Future<int> insertTrajet(Trajet trajet) async {
     final db = await database;
     return await db.insert('trajets', trajet.toMap());
   }
 
-  Future<List<Trajet>> getTrajets() async {
+  Future<int> updateTrajet(Trajet trajet) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
+    return await db.update(
       'trajets',
-      orderBy: 'date DESC',
+      trajet.toMap(),
+      where: 'id = ?',
+      whereArgs: [trajet.id],
     );
-    return List.generate(maps.length, (i) => Trajet.fromMap(maps[i]));
   }
 
   Future<void> deleteTrajet(int id) async {
@@ -508,6 +560,105 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  /// Créer automatiquement un trajet entre deux charges
+  Future<void> _createAutoTrajet(Charge chargeDepart, Charge chargeArrivee) async {
+    final db = await database;
+  
+    // Calculer l'énergie consommée en pourcentage
+    final energieConsommee = chargeDepart.jaugeFin - chargeArrivee.jaugeDebut;
+
+    // Ne pas créer de trajet si même station
+    if (chargeDepart.stationId != null && 
+        chargeDepart.stationId == chargeArrivee.stationId) {
+      print('Trajet ignoré: même station (${chargeDepart.stationId})');
+      return;
+    }
+  
+    // Ne créer un trajet que si l'énergie consommée est positive
+    if (energieConsommee <= 0) {
+      print('Trajet ignoré: énergie consommée = $energieConsommee');
+      return;
+    }
+    // RÉCUPÉRER LES NOMS DES STATIONS
+    String? nomStationDepart;
+    String? nomStationArrivee;
+  
+    if (chargeDepart.stationId != null) {
+      final stationDepart = await getStation(chargeDepart.stationId!);
+      nomStationDepart = stationDepart?.nom;
+    }
+  
+    if (chargeArrivee.stationId != null) {
+      final stationArrivee = await getStation(chargeArrivee.stationId!);
+      nomStationArrivee = stationArrivee?.nom;
+    }
+    print('Création trajet auto: ${chargeDepart.stationNom} → ${chargeArrivee.stationNom}');
+
+    final trajet = Trajet(
+      date: chargeArrivee.horodatage,
+      rechargeDepart: chargeDepart.id,
+      rechargeArrivee: chargeArrivee.id,
+      qtEnergiePercent: energieConsommee,
+      type: TypeTrajet.auto,
+      // Stocker aussi les données pour ne pas dépendre des charges
+      lieuDepart: nomStationDepart,
+      lieuArrivee: nomStationArrivee,
+      jaugeDepartPercent: chargeDepart.jaugeFin,
+      jaugeArriveePercent: chargeArrivee.jaugeDebut,
+      kilometrageDepart: chargeDepart.kilometrage,
+      kilometrageArrivee: chargeArrivee.kilometrage,
+    );
+    
+    await db.insert('trajets', trajet.toMap());
+    
+  }
+
+  /// Recalculer les trajets automatiques liés à une charge
+  Future<void> _updateTrajetsForCharge(int chargeId) async {
+    final db = await database;
+  
+    // Supprimer les trajets automatiques impliquant cette charge
+    await db.delete(
+      'trajets',
+      where: '(recharge_depart = ? OR recharge_arrivee = ?) AND type = ?',
+      whereArgs: [chargeId, chargeId, 'auto'],
+    );
+  
+    // Récupérer la charge modifiée
+    final chargeMap = await db.query(
+      'charges',
+      where: 'id = ?',
+      whereArgs: [chargeId],
+    );
+  
+    if (chargeMap.isEmpty) return;
+  
+    final charge = Charge.fromMap(chargeMap.first);
+  
+    // Seulement si c'est une charge complète
+    if (charge.statut != StatutCharge.complete) return;
+  
+    // Recréer le trajet avec la charge précédente
+    final previous = await getPreviousCharge(charge.horodatage);
+    if (previous != null && previous.statut == StatutCharge.complete) {
+      await _createAutoTrajet(previous, charge);
+    }
+  
+    // Recréer le trajet avec la charge suivante
+    final nextMaps = await db.query(
+      'charges',
+      where: 'horodatage > ? AND statut = ?',
+      whereArgs: [charge.horodatage.millisecondsSinceEpoch, 'complete'],
+      orderBy: 'horodatage ASC',
+      limit: 1,
+    );
+  
+    if (nextMaps.isNotEmpty) {
+      final next = Charge.fromMap(nextMaps.first);
+      await _createAutoTrajet(charge, next);
+    }
   }
 
   // ========== FERMETURE ==========

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:carwatt/presentation/screens/stations_management_screen.dart';
 import 'package:carwatt/presentation/screens/settings_screen.dart';
+import 'package:carwatt/presentation/screens/trajets_screen.dart';
+import 'package:carwatt/presentation/screens/home_screen.dart';
 
 class AppDrawer extends StatelessWidget {
   const AppDrawer({super.key});
@@ -48,30 +50,6 @@ class AppDrawer extends StatelessWidget {
               ],
             ),
           ),
-          ListTile(
-            leading: const Icon(Icons.dashboard, color: Colors.green),
-            title: const Text('Tableau de bord'),
-            onTap: () {
-              Navigator.pop(context); // Fermer le drawer
-              Navigator.popUntil(context, (route) => route.isFirst); // Retour à home
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.map, color: Colors.green),
-            title: const Text('Carte'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.popUntil(context, (route) => route.isFirst);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.bolt, color: Colors.green),
-            title: const Text('Charges'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.popUntil(context, (route) => route.isFirst);
-            },
-          ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.ev_station_outlined),
@@ -89,19 +67,15 @@ class AppDrawer extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.route_outlined),
             title: const Text('Trajets'),
-            trailing: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: const Text(
-                'Bientôt',
-                style: TextStyle(fontSize: 11),
-              ),
-            ),
-            enabled: false,
-            onTap: () {},
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const TrajetsScreen(),
+                ),
+              );
+            },
           ),
           const Divider(),
           ListTile(

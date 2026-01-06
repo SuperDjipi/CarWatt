@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:carwatt/data/database/database_helper.dart';
 import 'package:carwatt/data/models/station.dart';
+import 'package:carwatt/presentation/screens/map_picker_screen.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -257,20 +258,37 @@ class _StationFormScreenState extends State<StationFormScreen> {
             ),
             
             const SizedBox(height: 12),
-            
-            OutlinedButton.icon(
-              onPressed: _isLoadingPosition ? null : _getCurrentPosition,
-              icon: _isLoadingPosition
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.my_location),
-              label: const Text('Utiliser ma position actuelle'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.blue,
-              ),
+
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _isLoadingPosition ? null : _getCurrentPosition,
+                    icon: _isLoadingPosition
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.my_location),
+                    label: const Text('Ma position'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.blue,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _pickPositionOnMap,
+                    icon: const Icon(Icons.map),
+                    label: const Text('Choisir sur carte'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.green,
+                    ),
+                  ),
+                ),
+              ],
             ),
 
             const SizedBox(height: 32),
@@ -485,6 +503,41 @@ class _StationFormScreenState extends State<StationFormScreen> {
           SnackBar(content: Text('Erreur: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _pickPositionOnMap() async {
+    // Position initiale : soit celle déjà saisie, soit null
+    LatLng? initialPosition;
+    if (_latitudeController.text.isNotEmpty && 
+        _longitudeController.text.isNotEmpty) {
+      try {
+        initialPosition = LatLng(
+          double.parse(_latitudeController.text.replaceAll(',', '.')),
+          double.parse(_longitudeController.text.replaceAll(',', '.')),
+        );
+      } catch (e) {
+        // Position invalide, on laisse null
+      }
+    }
+
+    final result = await Navigator.push<MapPickerResult>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => MapPickerScreen(initialPosition: initialPosition),
+      ),
+    );
+
+    if (result != null) {
+      setState(() {
+        _latitudeController.text = result.position.latitude.toStringAsFixed(6);
+        _longitudeController.text = result.position.longitude.toStringAsFixed(6);
+        
+        // Remplir l'adresse si elle est disponible et que le champ est vide
+        if (result.address != null && _adresseController.text.isEmpty) {
+          _adresseController.text = result.address!;
+        }
+      });
     }
   }
 
