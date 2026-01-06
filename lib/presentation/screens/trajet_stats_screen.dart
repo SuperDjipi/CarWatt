@@ -15,11 +15,6 @@ class _TrajetStatsScreenState extends State<TrajetStatsScreen> {
   List<Trajet> _trajets = [];
   bool _isLoading = true;
   
-  // Stats globales
-  int _totalTrajets = 0;
-  double _distanceTotale = 0;
-  double _consoMoyenne = 0;
-  
   // Trajets récurrents (groupés par paire lieu départ/arrivée)
   Map<String, List<Trajet>> _trajetsRecurrents = {};
 
@@ -35,31 +30,11 @@ class _TrajetStatsScreenState extends State<TrajetStatsScreen> {
     try {
       final trajets = await _db.getTrajets(orderBy: 'date DESC');
       
-      // Calculer stats globales
-      int total = trajets.length;
-      double distTotal = 0;
-      double consoTotal = 0;
-      int consoCount = 0;
-      
-      for (var trajet in trajets) {
-        final dist = trajet.distance;
-        final conso = trajet.consoKwhAu100;
-        
-        if (dist != null) {
-          distTotal += dist;
-        }
-        
-        if (conso != null && conso > 0) {
-          consoTotal += conso;
-          consoCount++;
-        }
-      }
-      
       // Grouper les trajets récurrents
       final recurrents = <String, List<Trajet>>{};
-      print('=== DEBUG TRAJETS RÉCURRENTS ===');
+      
       for (var trajet in trajets) {
-        print('Trajet: ${trajet.lieuDepart} → ${trajet.lieuArrivee}');
+        
         if (trajet.lieuDepart != null && trajet.lieuArrivee != null) {
 
           final depart = trajet.lieuDepart!.trim().toLowerCase();
@@ -67,28 +42,21 @@ class _TrajetStatsScreenState extends State<TrajetStatsScreen> {
 
           // IGNORER les trajets avec départ = arrivée
           if (depart == arrivee) {
-            print('  -> Ignoré (même lieu)');
+            
             continue;
           }
           // Clé normalisée pour identifier les trajets similaires
           final key = '$depart → $arrivee';
-          print('  -> Clé: $key');
+          
           recurrents.putIfAbsent(key, () => []);
           recurrents[key]!.add(trajet);
         }
       }
-      print('Trajets récurrents trouvés: ${recurrents.length}');
-      recurrents.forEach((key, list) {
-        print('  $key: ${list.length} occurrences');
-      });
       // Ne garder que ceux avec au moins 2 occurrences
       recurrents.removeWhere((key, list) => list.length < 2);
       
       setState(() {
         _trajets = trajets;
-        _totalTrajets = total;
-        _distanceTotale = distTotal;
-        _consoMoyenne = consoCount > 0 ? consoTotal / consoCount : 0;
         _trajetsRecurrents = recurrents;
         _isLoading = false;
       });
@@ -119,41 +87,6 @@ class _TrajetStatsScreenState extends State<TrajetStatsScreen> {
                   child: ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
-                      // Stats globales
-                      const Text(
-                        'Vue d\'ensemble',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      
-                      _buildStatsCard(
-                        icon: Icons.route,
-                        iconColor: Colors.blue,
-                        title: 'Total trajets',
-                        value: _totalTrajets.toString(),
-                      ),
-                      const SizedBox(height: 12),
-                      
-                      _buildStatsCard(
-                        icon: Icons.straighten,
-                        iconColor: Colors.green,
-                        title: 'Distance totale',
-                        value: '${_distanceTotale.toStringAsFixed(0)} km',
-                      ),
-                      const SizedBox(height: 12),
-                      
-                      _buildStatsCard(
-                        icon: Icons.eco,
-                        iconColor: Colors.orange,
-                        title: 'Consommation moyenne',
-                        value: '${_consoMoyenne.toStringAsFixed(1)} kWh/100km',
-                      ),
-
-                      const SizedBox(height: 32),
-
                       // Trajets récurrents
                       if (_trajetsRecurrents.isNotEmpty) ...[
                         Row(
@@ -166,11 +99,22 @@ class _TrajetStatsScreenState extends State<TrajetStatsScreen> {
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                            Text(
-                              '${_trajetsRecurrents.length}',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.grey[600],
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.blue[100],
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '${_trajetsRecurrents.length}',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue[700],
+                                ),
                               ),
                             ),
                           ],
@@ -196,14 +140,14 @@ class _TrajetStatsScreenState extends State<TrajetStatsScreen> {
                               children: [
                                 Icon(
                                   Icons.timeline,
-                                  size: 48,
+                                  size: 64,
                                   color: Colors.grey[400],
                                 ),
                                 const SizedBox(height: 16),
                                 Text(
                                   'Aucun trajet récurrent détecté',
                                   style: TextStyle(
-                                    fontSize: 14,
+                                    fontSize: 16,
                                     color: Colors.grey[600],
                                   ),
                                   textAlign: TextAlign.center,
@@ -212,7 +156,7 @@ class _TrajetStatsScreenState extends State<TrajetStatsScreen> {
                                 Text(
                                   'Créez plusieurs fois le même trajet pour voir les statistiques',
                                   style: TextStyle(
-                                    fontSize: 12,
+                                    fontSize: 13,
                                     color: Colors.grey[500],
                                   ),
                                   textAlign: TextAlign.center,

@@ -4,3 +4,4 @@ Liste des charges :
 
 Pour la carte, il vaut mieux la centrer sur l'ensemble des points visibles (en particulier quand un réseau est choisi) ; mettre un FAB pour centrer sur la position gps si elle existe.
 
+Les stats trajets d'ensemble n'ont pas grand intérêt, d'autant qu'elles sont calculées à partir des trajets seulement donc d'un sous-ensemble
