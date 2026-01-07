@@ -33,7 +33,6 @@ class _ChargesListScreenState extends State<ChargesListScreen> {
     _stationFilter = widget.initialStationFilter; // Initialiser le filtre
     _loadCharges();
   }
-
   Future<void> _loadCharges() async {
     setState(() => _isLoading = true);
     
