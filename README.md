@@ -175,7 +175,7 @@ Ce projet est sous licence MIT. Voir le fichier [LICENSE](LICENSE) pour plus de 
 
 ## 📧 Contact
 
-Pour toute question ou suggestion : [votre-email@exemple.com](mailto:votre-email@exemple.com)
+Pour toute question ou suggestion : [boss@djipi.club](mailto:votre-email@exemple.com)
 
 ---
 
