@@ -8,7 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:csv/csv.dart' as csv_export;
 import 'package:carwatt/data/database/database_helper.dart';
 import 'package:carwatt/data/models/charge.dart';
-import 'package:carwatt/data/models/trajet.dart';
+// import 'package:carwatt/data/models/trajet.dart';
 import 'package:carwatt/data/utils/csv_importer.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -60,80 +60,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           duration: Duration(seconds: 1),
         ),
       );
-    }
-  }
-
-  Future<void> _recalculateTrajets() async {
-    try {
-      final db = await DatabaseHelper.instance.database;
-    
-      // Supprimer tous les trajets automatiques
-      await db.delete('trajets', where: 'type = ?', whereArgs: ['auto']);
-    
-      // Récupérer toutes les charges complètes
-      final charges = await DatabaseHelper.instance.getCharges(orderBy: 'horodatage ASC');
-      final chargesCompletes = charges.where((c) => c.statut == StatutCharge.complete).toList();
-    
-      // Recréer les trajets entre charges consécutives
-      for (int i = 0; i < chargesCompletes.length - 1; i++) {
-        final chargeDepart = chargesCompletes[i];
-        final chargeArrivee = chargesCompletes[i + 1];
-      
-        // Utiliser la méthode privée via reflection n'est pas possible
-        // On doit dupliquer la logique ou rendre la méthode publique
-        final energieConsommee = chargeDepart.jaugeFin - chargeArrivee.jaugeDebut;
-      
-        if (chargeDepart.stationId != null && 
-            chargeDepart.stationId == chargeArrivee.stationId) {
-          continue;
-        }
-      
-        if (energieConsommee <= 0) continue;
-      
-        String? nomStationDepart;
-        String? nomStationArrivee;
-      
-        if (chargeDepart.stationId != null) {
-          final stationDepart = await DatabaseHelper.instance.getStation(chargeDepart.stationId!);
-          nomStationDepart = stationDepart?.nom;
-        }
-      
-        if (chargeArrivee.stationId != null) {
-          final stationArrivee = await DatabaseHelper.instance.getStation(chargeArrivee.stationId!);
-          nomStationArrivee = stationArrivee?.nom;
-        }
-      
-        final trajet = Trajet(
-          date: chargeArrivee.horodatage,
-          rechargeDepart: chargeDepart.id,
-          rechargeArrivee: chargeArrivee.id,
-          qtEnergiePercent: energieConsommee,
-          type: TypeTrajet.auto,
-          lieuDepart: nomStationDepart,
-          lieuArrivee: nomStationArrivee,
-          jaugeDepartPercent: chargeDepart.jaugeFin,
-          jaugeArriveePercent: chargeArrivee.jaugeDebut,
-          kilometrageDepart: chargeDepart.kilometrage,
-          kilometrageArrivee: chargeArrivee.kilometrage,
-        );
-      
-        await DatabaseHelper.instance.insertTrajet(trajet);
-      }
-    
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Trajets recalculés avec succès !'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur: $e')),
-        );
-      }
     }
   }
 
@@ -256,55 +182,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         builder: (context) => const ImportCSVScreen(),
       ),
     );
-  }
-
-  Future<void> _migrateToV3() async {
-    try {
-      final db = await DatabaseHelper.instance.database;
-      
-      // Vérifier si la colonne type existe déjà
-      final result = await db.rawQuery('PRAGMA table_info(trajets)');
-      final hasTypeColumn = result.any((col) => col['name'] == 'type');
-      
-      if (!hasTypeColumn) {
-        // Ajouter les colonnes manquantes
-        await db.execute('ALTER TABLE trajets ADD COLUMN type TEXT CHECK(type IN (\'auto\', \'manual\')) NOT NULL DEFAULT \'auto\'');
-        await db.execute('ALTER TABLE trajets ADD COLUMN lieu_depart TEXT');
-        await db.execute('ALTER TABLE trajets ADD COLUMN lieu_arrivee TEXT');
-        await db.execute('ALTER TABLE trajets ADD COLUMN jauge_depart_percent REAL');
-        await db.execute('ALTER TABLE trajets ADD COLUMN jauge_arrivee_percent REAL');
-        await db.execute('ALTER TABLE trajets ADD COLUMN kilometrage_depart REAL');
-        await db.execute('ALTER TABLE trajets ADD COLUMN kilometrage_arrivee REAL');
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Base de données migrée vers v3 avec succès !'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 3),
-            ),
-          );
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Base de données déjà à jour (v3)'),
-              backgroundColor: Colors.blue,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur de migration: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
   }
 
   Future<void> _showDeleteConfirmation() async {
@@ -468,15 +345,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onTap: _importCSV,
                 ),
                 const SizedBox(height: 12),
-
-                _buildActionCard(
-                  icon: Icons.upgrade,
-                  title: 'Migrer la base de données v3',
-                  subtitle: 'Ajouter les colonnes pour les trajets',
-                  color: Colors.blue,
-                  onTap: _migrateToV3,
-                ),                
-                const SizedBox(height: 12),
                 
                 _buildActionCard(
                   icon: Icons.download,
@@ -493,15 +361,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: 'Action irréversible',
                   color: Colors.red,
                   onTap: _showDeleteConfirmation,
-                ),
-                const SizedBox(height: 12),
-
-                _buildActionCard(
-                  icon: Icons.refresh,
-                  title: 'Recalculer les trajets',
-                  subtitle: 'Supprimer et recréer tous les trajets auto',
-                  color: Colors.orange,
-                  onTap: _recalculateTrajets,
                 ),
                 const SizedBox(height: 32),
 

@@ -1,7 +1,0 @@
-Map marker CarWatt
-dreamshaperxl lightningdpmsde
-clip + : map marker icon for a mobile app, electric vehicle charging station symbol and lightning bolt in a circle, location pin shape, clean lines, green and gold colors, high contrast, minimalist vector style, modern UI icon, centered, white background
-clip - : watermark, text, shadow
-sampler : 
-203236410398179/ 8 steps/ 2.0 cfg / dpmpp_sde / karras
-sampler 2 : idem sauf 5 steps

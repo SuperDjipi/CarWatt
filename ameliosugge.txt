@@ -1,5 +1,0 @@
-Liste des charges :
-- dans la liste des recharges, pour chaque charge, une minicarte pour localiser la station
-- dans le détail, idem
-
-Angliciser ? -> v1.1.0 Ajouter champs commentaires

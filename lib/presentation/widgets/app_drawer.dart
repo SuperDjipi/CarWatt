@@ -25,10 +25,10 @@ class AppDrawer extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                const Icon(
-                  Icons.ev_station,
-                  size: 48,
-                  color: Colors.white,
+                Image.asset(
+                  'assets/images/carwatt1.png',
+                  width: 40,
+                  height: 40,
                 ),
                 const SizedBox(height: 16),
                 const Text(

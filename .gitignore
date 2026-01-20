@@ -63,6 +63,7 @@ build/
 *.jks
 *.keystore
 key.properties
+android/key.properties
 
 # Base de données locale (ne pas partager vos voyages personnels)
 *.db
@@ -81,4 +82,5 @@ key.properties
 .DS_Store
 
 # Fichiers personnels (optionnel - à vous de voir)
-# assets/voyages.json  # Décommentez si vous ne voulez pas partager vos données
+prive/
+*.csv

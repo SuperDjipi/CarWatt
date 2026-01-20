@@ -134,7 +134,7 @@ class _ChargeFormScreenState extends State<ChargeFormScreen> {
     _payeController.text = charge.paye.toStringAsFixed(2);
     _modeSaisie = charge.modeSaisie;
     if (charge.prixAuKwh != null) {
-      _prixKwhController.text = charge.prixAuKwh!.toStringAsFixed(3);
+      _prixKwhController.text = charge.prixAuKwh!.toStringAsFixed(4);
     }
     if (charge.prixE10 != null) {
       _prixE10Controller.text = charge.prixE10!.toStringAsFixed(3);
@@ -206,7 +206,7 @@ class _ChargeFormScreenState extends State<ChargeFormScreen> {
     if (chargesStation.isNotEmpty) {
       final derniere = chargesStation.last;
       if (derniere.prixAuKwh != null) {
-        _prixKwhController.text = derniere.prixAuKwh!.toStringAsFixed(3);
+        _prixKwhController.text = derniere.prixAuKwh!.toStringAsFixed(4);
         return;
       }
     }
@@ -227,14 +227,14 @@ class _ChargeFormScreenState extends State<ChargeFormScreen> {
       if (chargesReseau.isNotEmpty) {
         final derniere = chargesReseau.last;
         if (derniere.prixAuKwh != null) {
-          _prixKwhController.text = derniere.prixAuKwh!.toStringAsFixed(3);
+          _prixKwhController.text = derniere.prixAuKwh!.toStringAsFixed(4);
           return;
         }
       }
     }
     // Sinon, prendre le dernier prix kWh connu, quel que soit le réseau
     if (derniereCharge?.prixAuKwh != null) {
-      _prixKwhController.text = derniereCharge!.prixAuKwh!.toStringAsFixed(3);
+      _prixKwhController.text = derniereCharge!.prixAuKwh!.toStringAsFixed(4);
     }
   }
 
@@ -276,7 +276,7 @@ class _ChargeFormScreenState extends State<ChargeFormScreen> {
                   Row(
                     children: [
                       Expanded(
-                        flex: 2,
+                        flex: 3,
                         child: TextFormField(
                           controller: _dateController,
                           decoration: InputDecoration(
@@ -294,6 +294,7 @@ class _ChargeFormScreenState extends State<ChargeFormScreen> {
                       ),
                       const SizedBox(width: 12),
                       Expanded(
+                        flex: 2,
                         child: TextFormField(
                           controller: _timeController,
                           decoration: InputDecoration(
@@ -602,6 +603,7 @@ class _ChargeFormScreenState extends State<ChargeFormScreen> {
                     Row(
                       children: [
                         Expanded(
+                          flex: 3,
                           child: TextFormField(
                             controller: _prixKwhController,
                             decoration: InputDecoration(
@@ -624,6 +626,7 @@ class _ChargeFormScreenState extends State<ChargeFormScreen> {
                         ),
                         const SizedBox(width: 12),
                         Expanded(
+                          flex: 2,
                           child: TextFormField(
                             controller: _payeController,
                             decoration: InputDecoration(
